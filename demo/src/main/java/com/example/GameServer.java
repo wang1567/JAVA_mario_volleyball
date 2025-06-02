@@ -446,8 +446,22 @@ public class GameServer {
                 System.out.println("房間 [" + name + "] 雙方已準備，遊戲開始！");
                 // 初始化遊戲狀態，並通知客戶端遊戲開始
                 resetGameState();
-                broadcastMessage("GAME_START");
+                broadcastMessage("GAME_START"); // 通知客戶端遊戲開始，使用 GAME_START 而非 GAME_STARTED
                 start(); // 啟動遊戲邏輯執行緒
+
+                // 遊戲開始後，延遲一段時間進行第一次發球
+                new Timer().schedule(new TimerTask() {
+                    @Override
+                    public void run() {
+                        // 確保房間仍然活躍且遊戲已開始
+                        if (roomActive && gameStarted) {
+                            isBallReset = false; // 設定為 false，使球可見
+                            ballSpeedX = ballDirection ? 5 : -5; // 根據方向設置初始水平速度
+                            ballSpeedY = -8; // 向上發球
+                            // 第一次發球時，客戶端會根據接收到的狀態更新球的位置和速度
+                        }
+                    }
+                }, 2000); // 延遲2秒發球
             }
         }
 
