@@ -16,24 +16,20 @@ import javafx.scene.shape.Line;
 import javafx.application.Platform;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.geometry.Bounds;
 
-// 角色基類
+// 角色基類 (簡化，主要用於顯示)
 class Character extends Pane {
-    public static final double CHARACTER_SIZE = 64;
+    public static final double CHARACTER_WIDTH = 64;
+    public static final double CHARACTER_HEIGHT = 64;
     private Pane characterBody;
-    private double velocityY = 0;
-    private boolean isJumping = false;
-    private static final double GRAVITY = 0.7;
-    private static final double JUMP_POWER = -12;
-    private double targetX; // 新增：目標位置
-    private static final double MOVE_SPEED = 15.0; // 新增：移動速度
-    private static final double INTERPOLATION_FACTOR = 0.5; // 新增：插值因子
+    // 移除本地物理相關變數
 
     public Character(Color hatColor, Color overallsColor) {
         characterBody = new Pane();
-        characterBody.setPrefSize(CHARACTER_SIZE, CHARACTER_SIZE);
+        characterBody.setPrefSize(CHARACTER_WIDTH, CHARACTER_HEIGHT);
 
-        double pixelUnit = CHARACTER_SIZE / 16.0;
+        double pixelUnit = CHARACTER_WIDTH / 16.0; // 使用 CHARACTER_WIDTH 計算 pixelUnit
 
         // 顏色定義
         Color SKIN = Color.web("#FFCC99");
@@ -91,39 +87,10 @@ class Character extends Pane {
         parent.getChildren().add(rect);
     }
 
-    public void jump() {
-        if (!isJumping) {
-            velocityY = JUMP_POWER;
-            isJumping = true;
-        }
-    }
-
-    public void update() {
-        setTranslateY(getTranslateY() + velocityY);
-        velocityY += GRAVITY;
-
-        // 新增：平滑移動到目標位置
-        if (Math.abs(getTranslateX() - targetX) > 1) {
-            double newX = getTranslateX() + (targetX - getTranslateX()) * INTERPOLATION_FACTOR;
-            setTranslateX(newX);
-        }
-
-        // 地面判斷（假設地面在600-CHARACTER_SIZE）
-        if (getTranslateY() >= 600 - CHARACTER_SIZE) {
-            setTranslateY(600 - CHARACTER_SIZE);
-            velocityY = 0;
-            isJumping = false;
-        }
-        // 修正角色不會超出左右邊界
-        if (getTranslateX() < 0)
-            setTranslateX(0);
-        if (getTranslateX() > 800 - CHARACTER_SIZE)
-            setTranslateX(800 - CHARACTER_SIZE);
-    }
-
-    public void setTargetX(double x) {
-        this.targetX = x;
-    }
+    // 移除本地更新和跳躍方法
+    // public void jump() { ... }
+    // public void update() { ... }
+    // public void setTargetX(double x) { ... }
 }
 
 public class GamePage {
@@ -133,59 +100,68 @@ public class GamePage {
     private Character player2;
     private ImageView ball;
     private Text scoreText;
-    private double ballSpeedY = 3;
-    private double ballSpeedX = 2;
+    // 移除本地球速和計時器相關變數
     private Text timerText;
     private long startTime;
+
     private Socket socket;
     private PrintWriter out;
     private BufferedReader in;
-    private boolean isLeftPlayer;
+    private boolean isLeftPlayer; // 指示當前客戶端控制的是否是左側玩家 (Mario)
     private boolean isOnline;
-    private static final double NET_X = 400;
-    private static final double NET_WIDTH = 4;
-    private static final double NET_TOP_Y = 400;
-    private static final double NET_BOTTOM_Y = 550;
-    private static final double MOVE_DISTANCE = 12.0;
-    private long lastMoveTime = 0;
-    private static final long MOVE_COOLDOWN = 5;
-    private static final int WINNING_SCORE = 11;
-    private static final long BALL_SYNC_INTERVAL = 16;
-    private long lastBallSyncTime = 0;
-    private boolean isBallReset = false;
-    private boolean isMaster = false;
+    private Stage primaryStage;
+
     private static final double BALL_SIZE = 60; // 排球圖片大小
-    private boolean isGameOver = false; // 新增：遊戲結束標記
+    private static final double CHARACTER_WIDTH = 64;
+    private static final double CHARACTER_HEIGHT = 64;
+
+    private boolean isGameOver = false;
     private boolean isWaitingForRematch = false;
     private long rematchRequestTime = 0;
     private static final long REMATCH_TIMEOUT = 5000; // 5秒超時
     private Text rematchText = null;
     private AnimationTimer rematchTimer = null;
-    private Stage primaryStage; // 新增
+
+    // 新增用於狀態插值的變數
+    private double currentBallX, currentBallY, prevBallX, prevBallY;
+    private double currentP1X, currentP1Y, prevP1X, prevP1Y;
+    private double currentP2X, currentP2Y, prevP2X, prevP2Y;
+    private long lastStateUpdateTime; // 記錄上次收到狀態的時間
 
     public GamePage(boolean isLeftPlayer, boolean isOnline, Socket socket, Stage primaryStage) {
         this.isLeftPlayer = isLeftPlayer;
         this.isOnline = isOnline;
-        this.isMaster = isLeftPlayer;
         this.primaryStage = primaryStage; // 初始化
+
         if (isOnline && socket != null) {
             try {
                 this.socket = socket;
                 this.out = new PrintWriter(socket.getOutputStream(), true);
                 this.in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                listenForMessages();
+                listenForMessages(); // 啟動接收伺服器狀態的執行緒
+                startPingSender(); // 啟動發送心跳包的執行緒
             } catch (IOException e) {
                 e.printStackTrace();
+                // 顯示連線錯誤訊息並返回主選單
+                Platform.runLater(() -> {
+                    // 可以在這裡添加錯誤提示
+                    ModeSelectionPage modeSelectionPage = new ModeSelectionPage(primaryStage);
+                    primaryStage.setScene(modeSelectionPage.createModeSelectionScene());
+                });
             }
         }
+
         // 初始化排球圖片
         Image ballImage = new Image(
                 getClass().getResourceAsStream("/images/—Pngtree—volleyball ball cartoon hand painted_3843053.png"));
         ball = new ImageView(ballImage);
         ball.setFitWidth(BALL_SIZE);
         ball.setFitHeight(BALL_SIZE);
-        ball.setX(400 - BALL_SIZE / 2);
-        ball.setY(100 - BALL_SIZE / 2);
+        // 球的初始位置將由伺服器決定
+
+        // 初始化玩家角色 (位置將由伺服器決定)
+        player1 = new Character(Color.RED, Color.BLUE); // Mario
+        player2 = new Character(Color.GREEN, Color.BLUE); // Luigi
     }
 
     public Scene createGameScene() {
@@ -273,160 +249,73 @@ public class GamePage {
         gameLayout.getChildren().add(netTop);
 
         // --- 其餘遊戲物件 ---
-        startTime = System.currentTimeMillis();
+        startTime = System.currentTimeMillis(); // 計時器由客戶端控制顯示，時間本身不是關鍵同步狀態
         timerText = new Text("時間: 0");
         timerText.setLayoutX(50);
         timerText.setLayoutY(30);
         timerText.setStyle("-fx-font-size: 16; -fx-font-weight: bold; -fx-fill: white;");
         gameLayout.getChildren().add(timerText);
 
-        // Mario永遠在左，Luigi永遠在右
-        player1 = new Character(Color.RED, Color.BLUE); // Mario
-        player1.setTranslateX(50);
-        player1.setTranslateY(600 - Character.CHARACTER_SIZE);
-        player2 = new Character(Color.GREEN, Color.BLUE); // Luigi
-        player2.setTranslateX(750);
-        player2.setTranslateY(600 - Character.CHARACTER_SIZE);
-        player2.setTargetX(750);
-
         scoreText = new Text("左側玩家: " + player1Score + " - 右側玩家: " + player2Score);
         scoreText.setLayoutX(300);
         scoreText.setLayoutY(50);
         scoreText.setStyle(
                 "-fx-font-size: 20; -fx-font-weight: bold; -fx-fill: white; -fx-stroke: black; -fx-stroke-width: 1;");
-        showInstructions(gameLayout);
+        // 遊戲說明文字將由伺服器狀態決定是否顯示
+        // showInstructions(gameLayout);
         gameLayout.getChildren().addAll(player1, player2, ball, scoreText);
 
-        // --- AnimationTimer ---
+        // 移除 AnimationTimer 中的遊戲邏輯更新
         AnimationTimer timer = new AnimationTimer() {
             @Override
             public void handle(long now) {
-                player1.update();
-                player2.update();
+                // 移除本地玩家和球的 update() 調用
+                // player1.update();
+                // player2.update();
 
-                // 更新球的位置
-                if (isOnline) {
-                    if (isMaster) {
-                        // 主控方計算球的運動
-                        if (!isBallReset) {
-                            ball.setX(ball.getX() + ballSpeedX);
-                            ball.setY(ball.getY() + ballSpeedY);
-                            ballSpeedY += 0.3;
+                // 移除本地球的運動和碰撞檢測邏輯
+                // if (isOnline) { ... } else { ... }
 
-                            // 檢查球是否落地
-                            if (ball.getY() >= 600 - BALL_SIZE) {
-                                if (!isBallReset) {
-                                    isBallReset = true;
-                                    // 判斷球落在哪一邊
-                                    if (ball.getX() < NET_X - BALL_SIZE / 2) {
-                                        player2Score++;
-                                        sendAction("SCORE:" + player1Score + ":" + player2Score);
-                                    } else {
-                                        player1Score++;
-                                        sendAction("SCORE:" + player1Score + ":" + player2Score);
-                                    }
-                                    resetBall();
-                                    scoreText.setText("左側玩家: " + player1Score + " - 右側玩家: " + player2Score);
-                                    checkGameOver(); // 檢查是否遊戲結束
-                                }
-                            }
-
-                            // 球碰到左右邊界
-                            if (ball.getX() <= 0 || ball.getX() >= 800 - BALL_SIZE) {
-                                ballSpeedX *= -1;
-                            }
-
-                            // 球碰到網子
-                            if (ball.getX() + BALL_SIZE / 2 >= NET_X - NET_WIDTH / 2 &&
-                                    ball.getX() + BALL_SIZE / 2 <= NET_X + NET_WIDTH / 2 &&
-                                    ball.getY() + BALL_SIZE / 2 >= NET_TOP_Y &&
-                                    ball.getY() + BALL_SIZE / 2 <= NET_BOTTOM_Y) {
-                                ballSpeedX *= -1.1;
-                                ballSpeedY *= 0.9;
-                            }
-
-                            // 球碰到網子頂端圓
-                            double dx = ball.getX() + BALL_SIZE / 2 - NET_X;
-                            double dy = ball.getY() + BALL_SIZE / 2 - NET_TOP_Y;
-                            if (Math.sqrt(dx * dx + dy * dy) <= BALL_SIZE / 2 + 10) {
-                                ballSpeedY = -Math.abs(ballSpeedY) * 1.2;
-                                ballSpeedX *= 1.1;
-                            }
-
-                            // 球碰到玩家
-                            if (!isBallReset && ball.getBoundsInParent().intersects(player1.getBoundsInParent())) {
-                                ballSpeedY = -10;
-                                ballSpeedX = 4;
-                            }
-                            if (!isBallReset && ball.getBoundsInParent().intersects(player2.getBoundsInParent())) {
-                                ballSpeedY = -10;
-                                ballSpeedX = -4;
-                            }
-
-                            // 同步球的位置
-                            long currentTime = System.currentTimeMillis();
-                            if (currentTime - lastBallSyncTime >= BALL_SYNC_INTERVAL) {
-                                sendAction(String.format("BALL_POS:%.1f:%.1f:%.1f:%.1f:%b",
-                                        ball.getX(), ball.getY(), ballSpeedX, ballSpeedY, isBallReset));
-                                lastBallSyncTime = currentTime;
-                            }
-                        }
-                    }
-                } else {
-                    // 單人模式的球運動邏輯
-                    if (!isBallReset) {
-                        ball.setX(ball.getX() + ballSpeedX);
-                        ball.setY(ball.getY() + ballSpeedY);
-                        ballSpeedY += 0.3;
-
-                        // 檢查球是否落地
-                        if (ball.getY() >= 600 - BALL_SIZE) {
-                            if (!isBallReset) {
-                                isBallReset = true;
-                                if (ball.getX() < NET_X - BALL_SIZE / 2) {
-                                    player2Score++;
-                                } else {
-                                    player1Score++;
-                                }
-                                resetBall();
-                                scoreText.setText("左側玩家: " + player1Score + " - 右側玩家: " + player2Score);
-                                checkGameOver(); // 檢查是否遊戲結束
-                            }
-                        }
-
-                        // 其他碰撞檢測
-                        if (ball.getX() <= 0 || ball.getX() >= 800 - BALL_SIZE) {
-                            ballSpeedX *= -1;
-                        }
-
-                        if (ball.getX() + BALL_SIZE / 2 >= NET_X - NET_WIDTH / 2 &&
-                                ball.getX() + BALL_SIZE / 2 <= NET_X + NET_WIDTH / 2 &&
-                                ball.getY() + BALL_SIZE / 2 >= NET_TOP_Y &&
-                                ball.getY() + BALL_SIZE / 2 <= NET_BOTTOM_Y) {
-                            ballSpeedX *= -1.1;
-                            ballSpeedY *= 0.9;
-                        }
-
-                        double dx = ball.getX() + BALL_SIZE / 2 - NET_X;
-                        double dy = ball.getY() + BALL_SIZE / 2 - NET_TOP_Y;
-                        if (Math.sqrt(dx * dx + dy * dy) <= BALL_SIZE / 2 + 10) {
-                            ballSpeedY = -Math.abs(ballSpeedY) * 1.2;
-                            ballSpeedX *= 1.1;
-                        }
-
-                        if (!isBallReset && ball.getBoundsInParent().intersects(player1.getBoundsInParent())) {
-                            ballSpeedY = -10;
-                            ballSpeedX = 4;
-                        }
-                        if (!isBallReset && ball.getBoundsInParent().intersects(player2.getBoundsInParent())) {
-                            ballSpeedY = -10;
-                            ballSpeedX = -4;
-                        }
-                    }
-                }
-
+                // 更新計時器顯示 (可以保留客戶端顯示)
                 long elapsedTime = (System.currentTimeMillis() - startTime) / 1000;
                 timerText.setText("時間: " + elapsedTime);
+
+                // --- 狀態插值 --- (僅在線上模式下進行)
+                // 只有在接收到至少一個伺服器狀態後才進行更新
+                if (isOnline && lastStateUpdateTime > 0) {
+                    long currentTime = System.currentTimeMillis();
+                    // 計算插值因子 (0 到 1)
+                    // 理想情況下，elapsedTimeBetweenStates 應該接近 GAME_TICK_INTERVAL
+                    double interpolationFactor = (double) (currentTime - lastStateUpdateTime)
+                            / GameServer.GAME_TICK_INTERVAL;
+                    // Clamp 插值因子在 0 到 1 之間，防止過度插值
+                    interpolationFactor = Math.max(0, Math.min(1, interpolationFactor));
+
+                    // 插值計算球的位置
+                    double interpolatedBallX = prevBallX + (currentBallX - prevBallX) * interpolationFactor;
+                    double interpolatedBallY = prevBallY + (currentBallY - prevBallY) * interpolationFactor;
+                    ball.setX(interpolatedBallX);
+                    ball.setY(interpolatedBallY);
+
+                    // 插值計算玩家位置
+                    double interpolatedP1X = prevP1X + (currentP1X - prevP1X) * interpolationFactor;
+                    double interpolatedP1Y = prevP1Y + (currentP1Y - prevP1Y) * interpolationFactor;
+                    player1.setTranslateX(interpolatedP1X);
+                    player1.setTranslateY(interpolatedP1Y);
+
+                    double interpolatedP2X = prevP2X + (currentP2X - prevP2X) * interpolationFactor;
+                    double interpolatedP2Y = prevP2Y + (currentP2Y - prevP2Y) * interpolationFactor;
+                    player2.setTranslateX(interpolatedP2X);
+                    player2.setTranslateY(interpolatedP2Y);
+                } else if (isOnline && lastStateUpdateTime == 0) { // 如果是第一次收到狀態，直接設置位置
+                    ball.setX(currentBallX);
+                    ball.setY(currentBallY);
+                    player1.setTranslateX(currentP1X);
+                    player1.setTranslateY(currentP1Y);
+                    player2.setTranslateX(currentP2X);
+                    player2.setTranslateY(currentP2Y);
+                }
+                // ----------------
             }
         };
         timer.start();
@@ -439,7 +328,7 @@ public class GamePage {
         if (isGameOver) {
             if (event.getCode() == KeyCode.R) {
                 if (!isWaitingForRematch) {
-                    // 發起重新開始請求
+                    // 發起重新開始請求給伺服器
                     isWaitingForRematch = true;
                     rematchRequestTime = System.currentTimeMillis();
                     sendAction("REMATCH_REQUEST");
@@ -447,66 +336,46 @@ public class GamePage {
                     startRematchTimer();
                 }
             }
+            // 如果收到重新開始請求時按 R 鍵，同意請求
+            if (isWaitingForRematch && event.getCode() == KeyCode.R) {
+                acceptRematch();
+            }
             return;
         }
 
-        System.out.println("按下的鍵: " + event.getCode());
-        if (isLeftPlayer) {
-            // 只控制Mario
-            switch (event.getCode()) {
-                case A:
-                    movePlayer(player1, -MOVE_DISTANCE);
-                    sendAction("LEFT");
-                    break;
-                case D:
-                    movePlayer(player1, MOVE_DISTANCE);
-                    sendAction("RIGHT");
-                    break;
-                case W:
-                    player1.jump();
-                    sendAction("JUMP");
-                    break;
-            }
-        } else {
-            // 只控制Luigi
-            switch (event.getCode()) {
-                case LEFT:
-                    movePlayer(player2, -MOVE_DISTANCE);
-                    sendAction("LEFT");
-                    break;
-                case RIGHT:
-                    movePlayer(player2, MOVE_DISTANCE);
-                    sendAction("RIGHT");
-                    break;
-                case UP:
-                    player2.jump();
-                    sendAction("JUMP");
-                    break;
+        // 將玩家鍵盤輸入轉換為操作指令發送給伺服器
+        if (isOnline) {
+            if (isLeftPlayer) { // 控制玩家1 (Mario)
+                switch (event.getCode()) {
+                    case A:
+                        sendAction("ACTION:LEFT");
+                        break;
+                    case D:
+                        sendAction("ACTION:RIGHT");
+                        break;
+                    case W:
+                        sendAction("ACTION:JUMP");
+                        break;
+                }
+            } else { // 控制玩家2 (Luigi)
+                switch (event.getCode()) {
+                    case LEFT:
+                        sendAction("ACTION:LEFT"); // 客戶端發送LEFT/RIGHT/JUMP，伺服器判斷是哪個玩家並處理
+                        break;
+                    case RIGHT:
+                        sendAction("ACTION:RIGHT");
+                        break;
+                    case UP:
+                        sendAction("ACTION:JUMP");
+                        break;
+                }
             }
         }
+        // 單人模式的控制邏輯已移除
     }
 
-    private void movePlayer(Character player, double dx) {
-        long currentTime = System.currentTimeMillis();
-        if (currentTime - lastMoveTime < MOVE_COOLDOWN) {
-            return; // 如果冷卻時間未到，不執行移動
-        }
-        lastMoveTime = currentTime;
-
-        double newX = player.getTranslateX() + dx;
-        if (player == player1 && newX >= 0 && newX <= 400 - Character.CHARACTER_SIZE) {
-            player.setTargetX(newX);
-            if (isOnline) {
-                sendAction("MOVE:" + newX);
-            }
-        }
-        if (player == player2 && newX >= 400 && newX <= 800 - Character.CHARACTER_SIZE) {
-            player.setTargetX(newX);
-            if (isOnline) {
-                sendAction("MOVE:" + newX);
-            }
-        }
-    }
+    // 移除本地的 movePlayer 方法
+    // private void movePlayer(Character player, double dx) { ... }
 
     private void sendAction(String action) {
         if (isOnline && out != null) {
@@ -519,182 +388,169 @@ public class GamePage {
             try {
                 String msg;
                 while ((msg = in.readLine()) != null) {
-                    if (msg.equals("REMATCH_REQUEST")) {
-                        Platform.runLater(() -> {
-                            showRematchText("對方請求重新開始\n按R鍵同意");
-                            isWaitingForRematch = true;
-                            rematchRequestTime = System.currentTimeMillis();
-                            startRematchTimer();
-                        });
-                    } else if (msg.equals("REMATCH_ACCEPT")) {
-                        Platform.runLater(() -> {
-                            if (rematchText != null) {
-                                ((Pane) ball.getParent()).getChildren().remove(rematchText);
-                            }
-                            if (rematchTimer != null) {
-                                rematchTimer.stop();
-                            }
-                            resetGame();
-                        });
-                    } else if (msg.equals("RESET_GAME")) {
-                        Platform.runLater(() -> {
-                            if (rematchText != null) {
-                                ((Pane) ball.getParent()).getChildren().remove(rematchText);
-                            }
-                            if (rematchTimer != null) {
-                                rematchTimer.stop();
-                            }
-                            resetGame();
-                        });
-                    } else if (msg.startsWith("SCORE:")) {
-                        String[] scores = msg.substring(6).split(":");
-                        Platform.runLater(() -> {
+                    final String finalMessage = msg;
+                    System.out.println("GamePage 收到消息: " + finalMessage); // 新增日誌
+                    Platform.runLater(() -> {
+                        if (finalMessage.startsWith("STATE:")) {
+                            // 處理伺服器廣播的遊戲狀態
+                            System.out.println("GamePage 處理 STATE 消息..."); // 新增日誌
+                            updateGameState(finalMessage.substring(6));
+                        } else if (finalMessage.startsWith("SCORE:")) {
+                            // 伺服器發送分數更新 (冗餘，狀態訊息已包含分數，但保留以兼容舊邏輯)
+                            String[] scores = finalMessage.substring(6).split(":");
                             player1Score = Integer.parseInt(scores[0]);
                             player2Score = Integer.parseInt(scores[1]);
                             scoreText.setText("左側玩家: " + player1Score + " - 右側玩家: " + player2Score);
-                            checkGameOver(); // 檢查是否遊戲結束
-                        });
-                    } else if (msg.startsWith("GAME_OVER:")) {
-                        String[] gameOverData = msg.substring(10).split(":");
-                        Platform.runLater(() -> {
+                        } else if (finalMessage.equals("REMATCH_REQUEST")) {
+                            handleRematchRequest(); // 處理重新開始請求
+                        } else if (finalMessage.equals("RESET_GAME")) {
+                            // 伺服器通知重置遊戲
+                            resetGame();
+                        } else if (finalMessage.equals("OPPONENT_DISCONNECTED")) {
+                            // 處理對手斷線
+                            showGameOverText("對手已斷開連線");
+                        } else if (finalMessage.startsWith("GAME_OVER:")) {
+                            // 伺服器通知遊戲結束
+                            String[] gameOverData = finalMessage.substring(10).split(":");
                             player1Score = Integer.parseInt(gameOverData[0]);
                             player2Score = Integer.parseInt(gameOverData[1]);
                             String winner = gameOverData[2];
-                            scoreText.setText("左側玩家: " + player1Score + " - 右側玩家: " + player2Score);
-
-                            isGameOver = true;
-                            Text gameOverText = new Text(winner + "獲勝！\n按R鍵重新開始");
-                            gameOverText.setLayoutX(300);
-                            gameOverText.setLayoutY(300);
-                            gameOverText.setStyle(
-                                    "-fx-font-size: 30; -fx-font-weight: bold; -fx-fill: white; -fx-stroke: black; -fx-stroke-width: 2;");
-                            ((Pane) ball.getParent()).getChildren().add(gameOverText);
-
-                            isBallReset = true;
-                            ball.setVisible(false);
-                        });
-                    } else if (msg.startsWith("BALL_POS:")) {
-                        String[] ballData = msg.substring(9).split(":");
-                        Platform.runLater(() -> {
-                            if (!isMaster) { // 只有非主控方更新球的位置
-                                double newX = Double.parseDouble(ballData[0]);
-                                double newY = Double.parseDouble(ballData[1]);
-                                double newSpeedX = Double.parseDouble(ballData[2]);
-                                double newSpeedY = Double.parseDouble(ballData[3]);
-                                boolean newIsBallReset = Boolean.parseBoolean(ballData[4]);
-
-                                ball.setX(newX - BALL_SIZE / 2);
-                                ball.setY(newY - BALL_SIZE / 2);
-                                ballSpeedX = newSpeedX;
-                                ballSpeedY = newSpeedY;
-                                isBallReset = newIsBallReset;
-                            }
-                        });
-                    } else if (msg.startsWith("BALL_DIRECTION:")) {
-                        String direction = msg.substring(14);
-                        Platform.runLater(() -> {
-                            ballSpeedX = 2 * (direction.equals("RIGHT") ? 1 : -1);
-                            ballSpeedY = -6;
-                        });
-                    } else if (msg.startsWith("MOVE:")) {
-                        double newX = Double.parseDouble(msg.substring(5));
-                        Platform.runLater(() -> {
-                            if (isLeftPlayer) {
-                                // 只允許Luigi在右半場
-                                if (newX >= 400 && newX <= 800 - Character.CHARACTER_SIZE) {
-                                    player2.setTargetX(newX);
-                                }
-                            } else {
-                                // 只允許Mario在左半場
-                                if (newX >= 0 && newX <= 400 - Character.CHARACTER_SIZE) {
-                                    player1.setTargetX(newX);
-                                }
-                            }
-                        });
-                    } else if (msg.equals("JUMP")) {
-                        Platform.runLater(() -> {
-                            if (isLeftPlayer) {
-                                player2.jump(); // 第一玩家同步Luigi跳
-                            } else {
-                                player1.jump(); // 第二玩家同步Mario跳
-                            }
-                        });
-                    }
+                            showGameOverText(winner + "獲勝！");
+                        }
+                        // 移除 BALL_POS 和 BALL_DIRECTION 處理，這些信息包含在 STATE 訊息中
+                        // } else if (finalMessage.startsWith("BALL_POS:")) { ... }
+                        // } else if (finalMessage.startsWith("BALL_DIRECTION:")) { ... }
+                        // 移除 MOVE 和 JUMP 處理，這些是客戶端發送給伺服器的動作指令
+                        // } else if (finalMessage.startsWith("MOVE:")) { ... }
+                        // } else if (finalMessage.equals("JUMP")) { ... }
+                    });
                 }
             } catch (IOException e) {
+                // 與伺服器的連線斷開
                 e.printStackTrace();
+                Platform.runLater(() -> showGameOverText("與伺服器的連線已斷開"));
             }
         }).start();
     }
 
-    private void showInstructions(Pane gameLayout) {
-        Text instructions = new Text("控制玩家1: A (左), D (右), W (跳) | 控制玩家2: ← (左), → (右), ↑ (跳)");
-        instructions.setLayoutX(50);
-        instructions.setLayoutY(30);
-        instructions.setStyle("-fx-font-size: 14; -fx-font-weight: bold;");
-        gameLayout.getChildren().add(instructions);
+    // 新增方法：根據伺服器狀態更新遊戲畫面
+    private void updateGameState(String stateMessage) {
+        String[] stateData = stateMessage.split(":");
+        // STATE:ballX:ballY:ballSpeedX:ballSpeedY:player1X:player1Y:player1VelocityY:player1IsJumping:player2X:player2Y:player2VelocityY:player2IsJumping:player1Score:player2Score:isBallReset:isGameOver
+        if (stateData.length >= 16) { // 確保數據長度正確 (根據 GameServer 發送的 STATE 格式調整)
+            try {
+                // 如果是第一次收到狀態，則初始化 prev 和 current
+                if (lastStateUpdateTime == 0) {
+                    currentBallX = prevBallX = Double.parseDouble(stateData[0]);
+                    currentBallY = prevBallY = Double.parseDouble(stateData[1]);
+                    currentP1X = prevP1X = Double.parseDouble(stateData[4]);
+                    currentP1Y = prevP1Y = Double.parseDouble(stateData[5]);
+                    currentP2X = prevP2X = Double.parseDouble(stateData[8]);
+                    currentP2Y = prevP2Y = Double.parseDouble(stateData[9]);
+                } else {
+                    // 將當前狀態保存為前一個狀態
+                    prevBallX = currentBallX;
+                    prevBallY = currentBallY;
+                    prevP1X = currentP1X;
+                    prevP1Y = currentP1Y;
+                    prevP2X = currentP2X;
+                    prevP2Y = currentP2Y;
+
+                    // 解析伺服器發送的新的當前狀態
+                    currentBallX = Double.parseDouble(stateData[0]);
+                    currentBallY = Double.parseDouble(stateData[1]);
+                    // double serverBallSpeedX = Double.parseDouble(stateData[2]); // 客戶端不需要球速
+                    // double serverBallSpeedY = Double.parseDouble(stateData[3]); // 客戶端不需要球速
+                    currentP1X = Double.parseDouble(stateData[4]);
+                    currentP1Y = Double.parseDouble(stateData[5]);
+                    // double serverPlayer1VelocityY = Double.parseDouble(stateData[6]); // 客戶端不需要
+                    // boolean serverPlayer1IsJumping = Boolean.parseBoolean(stateData[7]); //
+                    // 客戶端不需要
+                    currentP2X = Double.parseDouble(stateData[8]);
+                    currentP2Y = Double.parseDouble(stateData[9]);
+                    // double serverPlayer2VelocityY = Double.parseDouble(stateData[10]); // 客戶端不需要
+                    // boolean serverPlayer2IsJumping = Boolean.parseBoolean(stateData[11]); //
+                    // 客戶端不需要
+                }
+
+                int serverPlayer1Score = Integer.parseInt(stateData[12]);
+                int serverPlayer2Score = Integer.parseInt(stateData[13]);
+                boolean serverIsBallReset = Boolean.parseBoolean(stateData[14]);
+                boolean serverIsGameOver = Boolean.parseBoolean(stateData[15]);
+
+                // 更新分數
+                player1Score = serverPlayer1Score;
+                player2Score = serverPlayer2Score;
+                scoreText.setText("左側玩家: " + player1Score + " - 右側玩家: " + player2Score);
+
+                // 處理遊戲結束和重置狀態
+                if (serverIsGameOver && !isGameOver) { // 遊戲剛剛結束
+                    Platform.runLater(() -> showGameOverText(
+                            (serverPlayer1Score > serverPlayer2Score ? "左側玩家" : "右側玩家") + "獲勝！"));
+                }
+                isGameOver = serverIsGameOver;
+
+                // 根據 isBallReset 狀態顯示/隱藏球 (伺服器控制發球延遲)
+                ball.setVisible(!serverIsBallReset);
+
+                // 更新上次收到狀態的時間
+                lastStateUpdateTime = System.currentTimeMillis();
+
+            } catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
+                System.err.println("解析遊戲狀態數據錯誤: " + stateMessage);
+                e.printStackTrace();
+            }
+        } else {
+            System.err.println("接收到無效的遊戲狀態訊息格式: " + stateMessage);
+        }
     }
+
+    // 移除 showInstructions 方法
+    // private void showInstructions(Pane gameLayout) { ... }
 
     private void resetBall() {
-        ball.setX(400 - BALL_SIZE / 2);
-        ball.setY(100 - BALL_SIZE / 2);
-        if (isOnline) {
-            sendAction("RESET_BALL:");
-            sendAction(String.format("BALL_POS:%.1f:%.1f:%.1f:%.1f:%b",
-                    ball.getX(), ball.getY(), ballSpeedX, ballSpeedY, isBallReset));
-        } else {
-            ballSpeedX = 2 * (Math.random() > 0.5 ? 1 : -1);
-            ballSpeedY = -6;
-        }
-        new Thread(() -> {
-            try {
-                Thread.sleep(1000);
-                isBallReset = false;
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }).start();
+        // 球的重置由伺服器控制，客戶端只根據狀態更新顯示
+        // ball.setX(400 - BALL_SIZE / 2);
+        // ball.setY(100 - BALL_SIZE / 2);
+        // if (isOnline) { sendAction("RESET_BALL:"); } else { ... }
+        // new Thread(() -> { ... }).start();
     }
 
-    private void checkGameOver() {
-        if (player1Score >= WINNING_SCORE || player2Score >= WINNING_SCORE) {
-            isGameOver = true;
-            String winner = player1Score >= WINNING_SCORE ? "左側玩家" : "右側玩家";
-
-            // 發送遊戲結束訊息給對手
-            if (isOnline) {
-                sendAction("GAME_OVER:" + player1Score + ":" + player2Score + ":" + winner);
-            }
-
-            Text gameOverText = new Text(winner + "獲勝！\n按R鍵重新開始");
-            gameOverText.setLayoutX(300);
-            gameOverText.setLayoutY(300);
-            gameOverText.setStyle(
-                    "-fx-font-size: 30; -fx-font-weight: bold; -fx-fill: white; -fx-stroke: black; -fx-stroke-width: 2;");
-            ((Pane) ball.getParent()).getChildren().add(gameOverText);
-
-            // 停止球的移動
-            isBallReset = true;
-            ball.setVisible(false);
-        }
-    }
+    // 移除本地的碰撞檢測和遊戲結束判斷
+    // private void checkGameOver() { ... }
 
     private void resetGame() {
+        // 遊戲重置由伺服器發起和控制
         player1Score = 0;
         player2Score = 0;
         scoreText.setText("左側玩家: " + player1Score + " - 右側玩家: " + player2Score);
         isGameOver = false;
         isWaitingForRematch = false;
-        ball.setVisible(true);
-        resetBall();
-        // 移除遊戲結束文字
+        ball.setVisible(true); // 顯示球
+        // 移除遊戲結束文字和重新開始提示
         ((Pane) ball.getParent()).getChildren().removeIf(node -> node instanceof Text &&
-                ((Text) node).getText().contains("獲勝"));
+                (((Text) node).getText().contains("獲勝") || ((Text) node).getText().contains("重新開始")));
 
-        // 通知對手遊戲重置
-        if (isOnline) {
-            sendAction("RESET_GAME");
+        // 玩家位置重置 (可選，如果STATE訊息包含玩家初始位置則不需要)
+        // player1.setTranslateX(50);
+        // player1.setTranslateY(600 - CHARACTER_SIZE);
+        // player2.setTranslateX(750);
+        // player2.setTranslateY(600 - CHARACTER_SIZE);
+        // player2.setTargetX(750);
+
+        // 如果重新開始計時器在運行，停止它
+        if (rematchTimer != null) {
+            rematchTimer.stop();
         }
+        // 重置插值狀態變數
+        currentBallX = prevBallX = 0;
+        currentBallY = prevBallY = 0;
+        currentP1X = prevP1X = 0;
+        currentP1Y = prevP1Y = 0;
+        currentP2X = prevP2X = 0;
+        currentP2Y = prevP2Y = 0;
+        lastStateUpdateTime = 0;
+
     }
 
     private void showRematchText(String message) {
@@ -725,6 +581,14 @@ public class GamePage {
                         if (rematchText != null) {
                             ((Pane) ball.getParent()).getChildren().remove(rematchText);
                         }
+                        // 清理 Socket 連線
+                        try {
+                            if (socket != null && !socket.isClosed()) {
+                                socket.close();
+                            }
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
                         ModeSelectionPage modeSelectionPage = new ModeSelectionPage(primaryStage);
                         primaryStage.setScene(modeSelectionPage.createModeSelectionScene());
                     });
@@ -733,5 +597,78 @@ public class GamePage {
             }
         };
         rematchTimer.start();
+    }
+
+    // 新增方法：處理遊戲結束顯示
+    private void showGameOverText(String message) {
+        isGameOver = true;
+        ball.setVisible(false); // 隱藏球
+        // 移除可能的重新開始提示
+        if (rematchText != null) {
+            ((Pane) ball.getParent()).getChildren().remove(rematchText);
+        }
+
+        Text gameOverText = new Text(message + "\n按R鍵重新開始");
+        gameOverText.setLayoutX(200);
+        gameOverText.setLayoutY(300);
+        gameOverText.setStyle(
+                "-fx-font-size: 30; -fx-font-weight: bold; -fx-fill: white; -fx-stroke: black; -fx-stroke-width: 2;");
+        ((Pane) ball.getParent()).getChildren().add(gameOverText);
+
+        // 如果重新開始計時器在運行，停止它
+        if (rematchTimer != null) {
+            rematchTimer.stop();
+        }
+    }
+
+    // 新增方法：客戶端發送心跳包給伺服器
+    private void startPingSender() {
+        new Thread(() -> {
+            while (isOnline && socket != null && !socket.isClosed()) {
+                try {
+                    out.println("PING");
+                    Thread.sleep(2000); // 每2秒發送一次心跳
+                } catch (Exception e) { // 捕獲 Exception 以解決 Linter 錯誤
+                    System.out.println("心跳發送失敗或執行緒中斷: " + e.getMessage());
+                    break;
+                }
+            }
+        }).start();
+    }
+
+    // 處理收到對手重新開始請求
+    private void handleRematchRequest() {
+        showRematchText("對方請求重新開始\n按R鍵同意");
+        isWaitingForRematch = true;
+        rematchRequestTime = System.currentTimeMillis();
+        startRematchTimer();
+    }
+
+    // 客戶端發送重新開始請求給伺服器
+    private void requestRematch() {
+        if (!isWaitingForRematch && isGameOver) { // 只有在遊戲結束且未發送請求時才能發送
+            isWaitingForRematch = true;
+            rematchRequestTime = System.currentTimeMillis();
+            sendAction("REMATCH_REQUEST");
+            showRematchText("等待對方同意重新開始...");
+            startRematchTimer();
+        }
+    }
+
+    // 客戶端同意重新開始請求
+    private void acceptRematch() {
+        if (isWaitingForRematch && isGameOver) { // 只有在等待對手同意且遊戲結束時才能同意
+            sendAction("REMATCH_ACCEPT");
+            // 客戶端本地先進行重置畫面的操作，實際遊戲重置由伺服器控制
+            resetGame();
+            // 移除重新開始提示文字
+            if (rematchText != null) {
+                ((Pane) ball.getParent()).getChildren().remove(rematchText);
+            }
+            isWaitingForRematch = false; // 重置等待狀態
+            if (rematchTimer != null) {
+                rematchTimer.stop();
+            }
+        }
     }
 }
