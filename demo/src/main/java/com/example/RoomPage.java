@@ -1,146 +1,164 @@
 package com.example;
 
-import javafx.scene.control.Button;
-import javafx.scene.control.TextField;
-import javafx.scene.layout.VBox;
 import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.layout.VBox;
+import javafx.scene.layout.HBox;
 import javafx.stage.Stage;
-import javafx.scene.text.Text;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.net.Socket;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import javafx.application.Platform;
+import javafx.geometry.Pos;
+import javafx.scene.paint.Color;
+import java.io.*;
+import java.net.*;
 
 public class RoomPage {
-    private Text statusText;
-    private Button createRoomButton;
-    private Button joinRoomButton;
+    private Stage primaryStage;
     private TextField roomNameField;
-    private boolean isWaitingForOpponent = false;
+    private TextField serverIPField;
+    private Label statusLabel;
+    private Socket socket;
+    private PrintWriter out;
+    private BufferedReader in;
+    private static final int PORT = 12345;
+
+    public RoomPage() {
+    }
 
     public VBox createRoomPage(Stage primaryStage) {
-        VBox layout = new VBox(20);
+        this.primaryStage = primaryStage;
+        VBox layout = new VBox(10);
+        layout.setAlignment(Pos.CENTER);
+        layout.setStyle("-fx-background-color: #34495E; -fx-padding: 20;");
 
-        roomNameField = new TextField("輸入房間名稱");
-        createRoomButton = new Button("創建房間");
-        joinRoomButton = new Button("加入房間");
-        statusText = new Text("請輸入房間名稱並選擇創建或加入房間。");
+        // 伺服器 IP 輸入
+        Label serverIPLabel = new Label("伺服器 IP 地址:");
+        serverIPLabel.setTextFill(Color.WHITE);
+        serverIPField = new TextField();
+        serverIPField.setPromptText("輸入伺服器 IP 地址");
+        serverIPField.setStyle("-fx-background-color: white;");
 
-        createRoomButton.setOnAction(e -> {
-            String roomName = roomNameField.getText();
-            if (roomName.isEmpty()) {
-                statusText.setText("請輸入房間名稱！");
-                return;
-            }
-            createRoom(roomName, primaryStage);
-        });
+        // 房間名稱輸入
+        Label roomNameLabel = new Label("房間名稱:");
+        roomNameLabel.setTextFill(Color.WHITE);
+        roomNameField = new TextField();
+        roomNameField.setPromptText("輸入房間名稱");
+        roomNameField.setStyle("-fx-background-color: white;");
 
-        joinRoomButton.setOnAction(e -> {
-            String roomName = roomNameField.getText();
-            if (roomName.isEmpty()) {
-                statusText.setText("請輸入房間名稱！");
-                return;
-            }
-            joinRoom(roomName, primaryStage);
-        });
+        // 按鈕
+        Button createRoomButton = new Button("創建房間");
+        Button joinRoomButton = new Button("加入房間");
+        createRoomButton.setStyle("-fx-background-color: #27AE60; -fx-text-fill: white;");
+        joinRoomButton.setStyle("-fx-background-color: #2980B9; -fx-text-fill: white;");
 
-        layout.getChildren().addAll(statusText, roomNameField, createRoomButton, joinRoomButton);
+        // 狀態標籤
+        statusLabel = new Label("");
+        statusLabel.setTextFill(Color.WHITE);
+
+        // 設置按鈕事件
+        createRoomButton.setOnAction(e -> createRoom());
+        joinRoomButton.setOnAction(e -> joinRoom());
+
+        // 添加所有元素到佈局
+        layout.getChildren().addAll(
+                serverIPLabel,
+                serverIPField,
+                roomNameLabel,
+                roomNameField,
+                createRoomButton,
+                joinRoomButton,
+                statusLabel);
+
         return layout;
     }
 
-    private void createRoom(String roomName, Stage primaryStage) {
+    private void connectToServer() {
         try {
-            Socket socket = connectToServer("localhost");
-            if (socket != null) {
-                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-
-                // 發送創建房間請求
-                out.println("CREATE_ROOM:" + roomName);
-
-                // 等待對手加入
-                Platform.runLater(() -> statusText.setText("等待對手加入房間..."));
-                isWaitingForOpponent = true;
-
-                // 監聽伺服器回應
-                new Thread(() -> {
-                    try {
-                        String response;
-                        while ((response = in.readLine()) != null) {
-                            String currentResponse = response;
-                            if (currentResponse.startsWith("ROOM_CREATED:")) {
-                                Platform.runLater(() -> statusText.setText("房間創建成功！等待對手加入..."));
-                            } else if (currentResponse.startsWith("OPPONENT_JOINED:")) {
-                                Platform.runLater(() -> {
-                                    statusText.setText("對手已加入！遊戲開始！");
-                                    primaryStage
-                                            .setScene(new GamePage(true, true, socket, primaryStage).createGameScene());
-                                });
-                                break;
-                            }
-                        }
-                    } catch (IOException ex) {
-                        ex.printStackTrace();
-                        Platform.runLater(() -> statusText.setText("連接錯誤！"));
-                    }
-                }).start();
+            String serverIP = serverIPField.getText().trim();
+            if (serverIP.isEmpty()) {
+                serverIP = "localhost";
             }
+            socket = new Socket(serverIP, PORT);
+            out = new PrintWriter(socket.getOutputStream(), true);
+            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+            // 啟動接收消息的線程
+            new Thread(this::receiveMessages).start();
+
+            statusLabel.setText("已連接到伺服器");
+            statusLabel.setTextFill(Color.GREEN);
         } catch (IOException e) {
-            e.printStackTrace();
-            Platform.runLater(() -> statusText.setText("無法連接到伺服器！"));
+            statusLabel.setText("無法連接到伺服器: " + e.getMessage());
+            statusLabel.setTextFill(Color.RED);
         }
     }
 
-    private void joinRoom(String roomName, Stage primaryStage) {
+    private void createRoom() {
+        if (socket == null || !socket.isConnected()) {
+            connectToServer();
+        }
+
+        String roomName = roomNameField.getText().trim();
+        if (roomName.isEmpty()) {
+            statusLabel.setText("請輸入房間名稱");
+            statusLabel.setTextFill(Color.RED);
+            return;
+        }
+
+        out.println("CREATE_ROOM:" + roomName);
+    }
+
+    private void joinRoom() {
+        if (socket == null || !socket.isConnected()) {
+            connectToServer();
+        }
+
+        String roomName = roomNameField.getText().trim();
+        if (roomName.isEmpty()) {
+            statusLabel.setText("請輸入房間名稱");
+            statusLabel.setTextFill(Color.RED);
+            return;
+        }
+
+        out.println("JOIN_ROOM:" + roomName);
+    }
+
+    private void receiveMessages() {
         try {
-            Socket socket = connectToServer("localhost");
-            if (socket != null) {
-                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-
-                // 發送加入房間請求
-                out.println("JOIN_ROOM:" + roomName);
-
-                // 監聽伺服器回應
-                new Thread(() -> {
-                    try {
-                        String response;
-                        while ((response = in.readLine()) != null) {
-                            String currentResponse = response;
-                            if (currentResponse.startsWith("ROOM_JOINED:")) {
-                                Platform.runLater(() -> statusText.setText("成功加入房間！等待遊戲開始..."));
-                            } else if (currentResponse.startsWith("GAME_START:")) {
-                                Platform.runLater(() -> {
-                                    statusText.setText("遊戲開始！");
-                                    primaryStage.setScene(
-                                            new GamePage(false, true, socket, primaryStage).createGameScene());
-                                });
-                                break;
-                            } else if (currentResponse.startsWith("ERROR:")) {
-                                Platform.runLater(() -> statusText.setText("錯誤：" + currentResponse.substring(6)));
-                                break;
-                            }
-                        }
-                    } catch (IOException ex) {
-                        ex.printStackTrace();
-                        Platform.runLater(() -> statusText.setText("連接錯誤！"));
+            String message;
+            while ((message = in.readLine()) != null) {
+                final String finalMessage = message;
+                javafx.application.Platform.runLater(() -> {
+                    if (finalMessage.startsWith("ERROR:")) {
+                        statusLabel.setText(finalMessage.substring(6));
+                        statusLabel.setTextFill(Color.RED);
+                    } else if (finalMessage.startsWith("ROOM_CREATED:")) {
+                        statusLabel.setText("房間創建成功，等待對手加入...");
+                        statusLabel.setTextFill(Color.GREEN);
+                    } else if (finalMessage.startsWith("ROOM_JOINED:")) {
+                        statusLabel.setText("成功加入房間，等待遊戲開始...");
+                        statusLabel.setTextFill(Color.GREEN);
+                    } else if (finalMessage.startsWith("OPPONENT_JOINED:")) {
+                        statusLabel.setText("對手已加入，遊戲即將開始！");
+                        statusLabel.setTextFill(Color.GREEN);
+                        out.println("GAME_READY:" + finalMessage.substring(16));
+                    } else if (finalMessage.equals("GAME_START")) {
+                        startGame();
+                    } else if (finalMessage.equals("OPPONENT_DISCONNECTED")) {
+                        statusLabel.setText("對手已斷開連線");
+                        statusLabel.setTextFill(Color.RED);
                     }
-                }).start();
+                });
             }
         } catch (IOException e) {
-            e.printStackTrace();
-            Platform.runLater(() -> statusText.setText("無法連接到伺服器！"));
+            javafx.application.Platform.runLater(() -> {
+                statusLabel.setText("與伺服器的連線已斷開");
+                statusLabel.setTextFill(Color.RED);
+            });
         }
     }
 
-    public Socket connectToServer(String serverAddress) {
-        try {
-            return new Socket(serverAddress, 12345);
-        } catch (IOException e) {
-            e.printStackTrace();
-            return null;
-        }
+    private void startGame() {
+        // 啟動遊戲邏輯
+        GamePage gamePage = new GamePage(true, true, socket, primaryStage);
+        primaryStage.setScene(gamePage.createGameScene());
     }
 }

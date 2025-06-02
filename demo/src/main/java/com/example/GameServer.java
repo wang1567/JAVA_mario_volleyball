@@ -8,15 +8,44 @@ public class GameServer {
     private static final int PORT = 12345;
     private static Map<String, Room> rooms = new HashMap<>();
     private static Map<Socket, String> clientRooms = new HashMap<>();
+    private static final int MAX_ROOMS = 100;
+    private static final int PING_INTERVAL = 5000; // 5秒發送一次心跳包
+    private static String serverIP;
 
     public static void main(String[] args) {
-        System.out.println("伺服器啟動，等待玩家連接...");
-        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
-            while (true) {
-                new ClientHandler(serverSocket.accept()).start();
+        try {
+            // 獲取伺服器的公網 IP 地址
+            serverIP = getPublicIP();
+            System.out.println("伺服器啟動，等待玩家連接...");
+            System.out.println("伺服器 IP 地址: " + serverIP);
+            System.out.println("伺服器端口: " + PORT);
+
+            try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+                while (true) {
+                    new ClientHandler(serverSocket.accept()).start();
+                }
             }
         } catch (IOException e) {
             e.printStackTrace();
+        }
+    }
+
+    private static String getPublicIP() {
+        try {
+            // 嘗試獲取公網 IP
+            URL url = new URL("http://checkip.amazonaws.com");
+            BufferedReader reader = new BufferedReader(new InputStreamReader(url.openStream()));
+            String ip = reader.readLine().trim();
+            reader.close();
+            return ip;
+        } catch (Exception e) {
+            try {
+                // 如果無法獲取公網 IP，則使用本地 IP
+                InetAddress localHost = InetAddress.getLocalHost();
+                return localHost.getHostAddress();
+            } catch (Exception ex) {
+                return "localhost";
+            }
         }
     }
 
@@ -26,13 +55,41 @@ public class GameServer {
         Socket guest;
         PrintWriter hostWriter;
         PrintWriter guestWriter;
-        boolean ballDirection; // true 表示向右，false 表示向左
+        boolean ballDirection;
+        long lastHostPing;
+        long lastGuestPing;
+        boolean gameStarted;
 
         public Room(String name, Socket host, PrintWriter hostWriter) {
             this.name = name;
             this.host = host;
             this.hostWriter = hostWriter;
-            this.ballDirection = Math.random() > 0.5; // 初始化發球方向
+            this.ballDirection = Math.random() > 0.5;
+            this.lastHostPing = System.currentTimeMillis();
+            this.lastGuestPing = System.currentTimeMillis();
+            this.gameStarted = false;
+        }
+
+        public void checkConnection() {
+            long currentTime = System.currentTimeMillis();
+            if (currentTime - lastHostPing > PING_INTERVAL * 2) {
+                if (guest != null) {
+                    guestWriter.println("OPPONENT_DISCONNECTED");
+                }
+                cleanup();
+            }
+            if (guest != null && currentTime - lastGuestPing > PING_INTERVAL * 2) {
+                hostWriter.println("OPPONENT_DISCONNECTED");
+                cleanup();
+            }
+        }
+
+        private void cleanup() {
+            rooms.remove(name);
+            clientRooms.remove(host);
+            if (guest != null) {
+                clientRooms.remove(guest);
+            }
         }
     }
 
@@ -40,6 +97,7 @@ public class GameServer {
         private Socket socket;
         private PrintWriter out;
         private BufferedReader in;
+        private boolean isAlive = true;
 
         public ClientHandler(Socket socket) {
             this.socket = socket;
@@ -50,8 +108,11 @@ public class GameServer {
                 in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                 out = new PrintWriter(socket.getOutputStream(), true);
 
+                // 啟動心跳包檢查
+                startPingCheck();
+
                 String message;
-                while ((message = in.readLine()) != null) {
+                while (isAlive && (message = in.readLine()) != null) {
                     System.out.println("收到消息: " + message);
                     handleMessage(message);
                 }
@@ -60,6 +121,30 @@ public class GameServer {
             } finally {
                 cleanup();
             }
+        }
+
+        private void startPingCheck() {
+            new Thread(() -> {
+                while (isAlive) {
+                    try {
+                        Thread.sleep(PING_INTERVAL);
+                        String roomName = clientRooms.get(socket);
+                        if (roomName != null) {
+                            Room room = rooms.get(roomName);
+                            if (room != null) {
+                                if (socket == room.host) {
+                                    room.lastHostPing = System.currentTimeMillis();
+                                } else {
+                                    room.lastGuestPing = System.currentTimeMillis();
+                                }
+                                room.checkConnection();
+                            }
+                        }
+                    } catch (InterruptedException e) {
+                        break;
+                    }
+                }
+            }).start();
         }
 
         private void handleMessage(String message) {
@@ -73,13 +158,25 @@ public class GameServer {
                 String roomName = clientRooms.get(socket);
                 if (roomName != null) {
                     Room room = rooms.get(roomName);
-                    if (room != null) {
-                        // 發送統一的發球方向給兩個玩家
+                    if (room != null && room.gameStarted) {
                         String direction = room.ballDirection ? "RIGHT" : "LEFT";
                         room.hostWriter.println("BALL_DIRECTION:" + direction);
                         room.guestWriter.println("BALL_DIRECTION:" + direction);
-                        // 更新下一次的發球方向
                         room.ballDirection = !room.ballDirection;
+                    }
+                }
+            } else if (message.startsWith("GAME_READY:")) {
+                String roomName = clientRooms.get(socket);
+                if (roomName != null) {
+                    Room room = rooms.get(roomName);
+                    if (room != null) {
+                        if (socket == room.host) {
+                            room.hostWriter.println("WAITING_FOR_OPPONENT");
+                        } else {
+                            room.gameStarted = true;
+                            room.hostWriter.println("GAME_START");
+                            room.guestWriter.println("GAME_START");
+                        }
                     }
                 }
             } else {
@@ -87,7 +184,7 @@ public class GameServer {
                 String roomName = clientRooms.get(socket);
                 if (roomName != null) {
                     Room room = rooms.get(roomName);
-                    if (room != null) {
+                    if (room != null && room.gameStarted) {
                         if (socket == room.host) {
                             room.guestWriter.println(message);
                         } else {
@@ -100,6 +197,10 @@ public class GameServer {
 
         private void createRoom(String roomName) {
             synchronized (rooms) {
+                if (rooms.size() >= MAX_ROOMS) {
+                    out.println("ERROR:伺服器已滿");
+                    return;
+                }
                 if (rooms.containsKey(roomName)) {
                     out.println("ERROR:房間已存在");
                     return;
@@ -127,11 +228,11 @@ public class GameServer {
                 clientRooms.put(socket, roomName);
                 out.println("ROOM_JOINED:" + roomName);
                 room.hostWriter.println("OPPONENT_JOINED:" + roomName);
-                room.guestWriter.println("GAME_START:" + roomName);
             }
         }
 
         private void cleanup() {
+            isAlive = false;
             try {
                 String roomName = clientRooms.get(socket);
                 if (roomName != null) {
