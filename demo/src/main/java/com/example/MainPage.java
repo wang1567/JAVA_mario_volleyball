@@ -16,14 +16,14 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.effect.DropShadow;
 
-public class ModeSelectionPage {
+public class MainPage {
     private Stage primaryStage;
 
-    public ModeSelectionPage(Stage primaryStage) {
+    public MainPage(Stage primaryStage) {
         this.primaryStage = primaryStage;
     }
 
-    public Scene createModeSelectionScene() {
+    public Scene createMainScene() {
         Pane mainLayout = new Pane();
         mainLayout.setPrefSize(800, 600);
 
@@ -107,18 +107,30 @@ public class ModeSelectionPage {
         VBox buttonBox = new VBox(20);
         buttonBox.setAlignment(Pos.CENTER);
         buttonBox.setLayoutX(300);
-        buttonBox.setLayoutY(250);
+        buttonBox.setLayoutY(200);
 
         // 創建按鈕
+        Button singlePlayerButton = createStyledButton("單人模式");
+        Button multiPlayerButton = createStyledButton("雙人模式");
         Button onlineButton = createStyledButton("線上對戰");
 
         // 添加按鈕事件
+        singlePlayerButton.setOnAction(e -> {
+            GamePage gamePage = new GamePage(true, false, null, primaryStage);
+            primaryStage.setScene(gamePage.createGameScene());
+        });
+
+        multiPlayerButton.setOnAction(e -> {
+            GamePage gamePage = new GamePage(true, false, null, primaryStage);
+            primaryStage.setScene(gamePage.createGameScene());
+        });
+
         onlineButton.setOnAction(e -> {
             OnlinePage onlinePage = new OnlinePage(primaryStage);
             primaryStage.setScene(onlinePage.createOnlineScene());
         });
 
-        buttonBox.getChildren().add(onlineButton);
+        buttonBox.getChildren().addAll(singlePlayerButton, multiPlayerButton, onlineButton);
         mainLayout.getChildren().add(buttonBox);
 
         return new Scene(mainLayout, 800, 600);

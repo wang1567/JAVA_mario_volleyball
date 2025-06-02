@@ -75,7 +75,8 @@ public class RoomPage {
                             } else if (currentResponse.startsWith("OPPONENT_JOINED:")) {
                                 Platform.runLater(() -> {
                                     statusText.setText("對手已加入！遊戲開始！");
-                                    primaryStage.setScene(new GamePage(true, true, socket).createGameScene());
+                                    primaryStage
+                                            .setScene(new GamePage(true, true, socket, primaryStage).createGameScene());
                                 });
                                 break;
                             }
@@ -113,7 +114,8 @@ public class RoomPage {
                             } else if (currentResponse.startsWith("GAME_START:")) {
                                 Platform.runLater(() -> {
                                     statusText.setText("遊戲開始！");
-                                    primaryStage.setScene(new GamePage(false, true, socket).createGameScene());
+                                    primaryStage.setScene(
+                                            new GamePage(false, true, socket, primaryStage).createGameScene());
                                 });
                                 break;
                             } else if (currentResponse.startsWith("ERROR:")) {
